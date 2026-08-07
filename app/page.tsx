@@ -12,9 +12,8 @@ export default function Home() {
   const [userStatuses, setUserStatuses] = useState<{ [key: number]: string }>({});
   const [nickname, setNickname] = useState('');
   const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [matches, setMatches] = useState<any[]>([]);
+  const [cardMarket, setCardMarket] = useState<{ [key: number]: { need: string[], have: string[] } }>({});
 
-  // Logowanie po pseudonime
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
     if (nickname.trim()) {
@@ -35,11 +34,11 @@ export default function Home() {
     if (!isLoggedIn) return;
 
     async function fetchData() {
-      // 1. Pobierz karty
+      // 1. Pobierz wszystkie karty
       const { data: cardsData } = await supabase.from('cards').select('*');
       if (cardsData) setCards(cardsData);
 
-      // 2. Pobierz statusy użytkownika
+      // 2. Pobierz statusy zalogowanego użytkownika
       const { data: userCardsData } = await supabase
         .from('user_cards')
         .select('*')
@@ -53,24 +52,26 @@ export default function Home() {
         setUserStatuses(statusMap);
       }
 
-      // 3. Matchmaking: Znajdź graczy, którzy mają to, czego Ty szukasz, i szukają tego, co Ty masz
-      const myNeeds = userCardsData?.filter(uc => uc.status === 'need').map(uc => uc.card_id) || [];
-      const myHaves = userCardsData?.filter(uc => uc.status === 'have').map(uc => uc.card_id) || [];
+      // 3. Pobierz wpisy WSZYSTKICH graczy, aby zbudować rynek wymian
+      const { data: allUsersCards } = await supabase
+        .from('user_cards')
+        .select('*');
 
-      if (myNeeds.length > 0 || myHaves.length > 0) {
-        const { data: allUsersCards } = await supabase
-          .from('user_cards')
-          .select('*')
-          .neq('user_id', nickname);
+      if (allUsersCards) {
+        const market: { [key: number]: { need: string[], have: string[] } } = {};
+        
+        allUsersCards.forEach((uc: any) => {
+          if (!market[uc.card_id]) {
+            market[uc.card_id] = { need: [], have: [] };
+          }
+          if (uc.status === 'need') {
+            market[uc.card_id].need.push(uc.user_id);
+          } else if (uc.status === 'have') {
+            market[uc.card_id].have.push(uc.user_id);
+          }
+        });
 
-        if (allUsersCards) {
-          // Znajdź graczy, którzy mają karty, których Ty potrzebujesz
-          const potentialMatches = allUsersCards.filter(uc => 
-            (uc.status === 'have' && myNeeds.includes(uc.card_id)) ||
-            (uc.status === 'need' && myHaves.includes(uc.card_id))
-          );
-          setMatches(potentialMatches);
-        }
+        setCardMarket(market);
       }
     }
     fetchData();
@@ -118,11 +119,12 @@ export default function Home() {
   }
 
   return (
-    <div className="p-8 font-sans max-w-5xl mx-auto text-white">
+    <div className="p-8 font-sans max-w-6xl mx-auto text-white">
+      {/* Nagłówek */}
       <div className="flex justify-between items-center mb-8 bg-gray-900 p-4 rounded-xl border border-gray-800">
-        <h1 className="text-2xl font-bold">Wymiana Kart</h1>
-        <div className="text-gray-400">
-          Zalogowany jako: <span className="text-white font-bold">{nickname}</span>
+        <h1 className="text-2xl font-bold">Wymiana Kart - Giełda</h1>
+        <div className="text-gray-400 text-sm sm:text-base">
+          Zalogowany: <span className="text-white font-bold">{nickname}</span>
           <button 
             onClick={() => { setIsLoggedIn(false); localStorage.removeItem('trade_nickname'); }}
             className="ml-4 text-xs bg-red-950 text-red-400 border border-red-900 px-3 py-1 rounded-lg hover:bg-red-900"
@@ -132,45 +134,58 @@ export default function Home() {
         </div>
       </div>
 
-      {matches.length > 0 && (
-        <div className="mb-10 bg-blue-950/30 border border-blue-900/50 p-6 rounded-2xl">
-          <h2 className="text-xl font-bold text-blue-400 mb-3">🔥 Znaleziono potencjalne wymiany!</h2>
-          <p className="text-sm text-gray-300 mb-4">Inni gracze posiadają karty, których szukasz lub szukają Twoich duplikatów:</p>
-          <div className="flex flex-col gap-2">
-            {matches.map((m, idx) => (
-              <div key={idx} className="bg-gray-900 p-3 rounded-lg border border-gray-800 flex justify-between items-center text-sm">
-                <span>Gracz <strong className="text-white">{m.user_id}</strong> ma status: <span className="text-yellow-400 uppercase">{m.status}</span> dla karty ID: {m.card_id}</span>
-                <span className="text-xs text-gray-500">Skontaktuj się w grze</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      <h2 className="text-xl font-semibold mb-4">Katalog wszystkich kart</h2>
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      {/* Katalog kart połączony z giełdą graczy */}
+      <h2 className="text-xl font-semibold mb-4">Katalog kart i statusy wymian</h2>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {cards.map((card) => {
           const currentStatus = userStatuses[card.id];
+          const cardData = cardMarket[card.id] || { need: [], have: [] };
 
           return (
-            <div key={card.id} className="border border-gray-800 p-5 rounded-xl shadow-sm bg-gray-900">
-              <h3 className="text-xl font-bold">{card.name}</h3>
-              <p className="text-gray-400 text-sm mb-4">Zestaw: {card.set_name || 'Brak'}</p>
+            <div key={card.id} className="border border-gray-800 p-5 rounded-xl shadow-lg bg-gray-900 flex flex-col justify-between">
+              <div>
+                <div className="flex justify-between items-start mb-2">
+                  <h3 className="text-xl font-bold">{card.name}</h3>
+                  <span className="text-xs bg-gray-800 text-gray-300 px-2 py-1 rounded">ID: {card.id}</span>
+                </div>
+                <p className="text-gray-400 text-sm mb-4">Zestaw: {card.set_name || 'Brak'}</p>
+
+                {/* Sekcja giełdowa: Kto ma, kto szuka */}
+                <div className="mb-5 bg-gray-950/60 p-3 rounded-lg border border-gray-800/80 text-xs space-y-2">
+                  <div>
+                    <span className="text-green-400 font-semibold">🟢 Mają na wymianę:</span>{' '}
+                    {cardData.have.length > 0 ? (
+                      <span className="text-gray-300">{cardData.have.join(', ')}</span>
+                    ) : (
+                      <span className="text-gray-600 italic">nikt</span>
+                    )}
+                  </div>
+                  <div>
+                    <span className="text-red-400 font-semibold">🔴 Szukają karty:</span>{' '}
+                    {cardData.need.length > 0 ? (
+                      <span className="text-gray-300">{cardData.need.join(', ')}</span>
+                    ) : (
+                      <span className="text-gray-600 italic">nikt</span>
+                    )}
+                  </div>
+                </div>
+              </div>
               
+              {/* Przyciski zarządzania własnym stanem karty */}
               <div className="flex flex-col gap-2">
                 <button 
                   onClick={() => handleCardAction(card.id, 'need')}
-                  className={`py-2 rounded-lg border transition ${
+                  className={`py-2 rounded-lg border text-sm transition ${
                     currentStatus === 'need' 
                       ? 'bg-red-600 text-white border-red-500 font-bold' 
                       : 'bg-red-950/40 text-red-400 border-red-900 hover:bg-red-900/40'
                   }`}
                 >
-                  {currentStatus === 'need' ? '✓ Potrzebuję' : 'Potrzebuję'}
+                  {currentStatus === 'need' ? '✓ Potrzebuję tej karty' : 'Potrzebuję'}
                 </button>
                 <button 
                   onClick={() => handleCardAction(card.id, 'have')}
-                  className={`py-2 rounded-lg border transition ${
+                  className={`py-2 rounded-lg border text-sm transition ${
                     currentStatus === 'have' 
                       ? 'bg-green-600 text-white border-green-500 font-bold' 
                       : 'bg-green-950/40 text-green-400 border-green-900 hover:bg-green-900/40'
