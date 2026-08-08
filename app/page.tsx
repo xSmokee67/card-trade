@@ -7,12 +7,21 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
+const CATEGories = [
+  { id: 'all', label: 'Wszystkie' },
+  { id: 'elixir', label: 'Elixir' },
+  { id: 'builder_base', label: 'Builder Base' },
+  { id: 'dark_elixir', label: 'Dark Elixir' },
+  { id: 'super_troops', label: 'Super Troops' },
+];
+
 export default function Home() {
   const [cards, setCards] = useState<any[]>([]);
   const [userStatuses, setUserStatuses] = useState<{ [key: number]: string }>({});
   const [nickname, setNickname] = useState('');
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [cardMarket, setCardMarket] = useState<{ [key: number]: { need: string[], have: string[] } }>({});
+  const [selectedCategory, setSelectedCategory] = useState('all');
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
@@ -34,11 +43,9 @@ export default function Home() {
     if (!isLoggedIn) return;
 
     async function fetchData() {
-      // 1. Pobierz wszystkie karty
       const { data: cardsData } = await supabase.from('cards').select('*');
       if (cardsData) setCards(cardsData);
 
-      // 2. Pobierz statusy zalogowanego użytkownika
       const { data: userCardsData } = await supabase
         .from('user_cards')
         .select('*')
@@ -52,7 +59,6 @@ export default function Home() {
         setUserStatuses(statusMap);
       }
 
-      // 3. Pobierz wpisy WSZYSTKICH graczy, aby zbudować rynek wymian
       const { data: allUsersCards } = await supabase
         .from('user_cards')
         .select('*');
@@ -96,11 +102,16 @@ export default function Home() {
     }
   };
 
+  // Filtrowanie kart po wybranej kategorii
+  const filteredCards = selectedCategory === 'all' 
+    ? cards 
+    : cards.filter(card => card.category === selectedCategory);
+
   if (!isLoggedIn) {
     return (
       <div className="min-h-screen bg-gray-950 flex items-center justify-center p-4">
         <form onSubmit={handleLogin} className="bg-gray-900 border border-gray-800 p-8 rounded-2xl max-w-md w-full shadow-xl">
-          <h1 className="text-2xl font-bold text-white mb-2">Wymiana Kart</h1>
+          <h1 className="text-2xl font-bold text-white mb-2">Wymiana Kart CoC</h1>
           <p className="text-gray-400 text-sm mb-6">Wpisz swój pseudonim w grze, aby rozpocząć:</p>
           <input
             type="text"
@@ -120,10 +131,9 @@ export default function Home() {
 
   return (
     <div className="p-8 font-sans max-w-6xl mx-auto text-white">
-      {/* Nagłówek */}
       <div className="flex justify-between items-center mb-8 bg-gray-900 p-4 rounded-xl border border-gray-800">
         <h1 className="text-2xl font-bold">Wymiana Kart - Giełda</h1>
-        <div className="text-gray-400 text-sm sm:text-base">
+        <div className="text-gray-400 text-sm">
           Zalogowany: <span className="text-white font-bold">{nickname}</span>
           <button 
             onClick={() => { setIsLoggedIn(false); localStorage.removeItem('trade_nickname'); }}
@@ -134,10 +144,26 @@ export default function Home() {
         </div>
       </div>
 
-      {/* Katalog kart połączony z giełdą graczy */}
-      <h2 className="text-xl font-semibold mb-4">Katalog kart i statusy wymian</h2>
+      {/* Pasek kategorii (Zakładki) */}
+      <div className="flex flex-wrap gap-2 mb-8">
+        {CATEGories.map((cat) => (
+          <button
+            key={cat.id}
+            onClick={() => setSelectedCategory(cat.id)}
+            className={`px-4 py-2 rounded-xl font-medium text-sm transition ${
+              selectedCategory === cat.id
+                ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/40'
+                : 'bg-gray-900 text-gray-400 border border-gray-800 hover:bg-gray-800 hover:text-white'
+            }`}
+          >
+            {cat.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Katalog kart */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {cards.map((card) => {
+        {filteredCards.map((card) => {
           const currentStatus = userStatuses[card.id];
           const cardData = cardMarket[card.id] || { need: [], have: [] };
 
@@ -146,11 +172,13 @@ export default function Home() {
               <div>
                 <div className="flex justify-between items-start mb-2">
                   <h3 className="text-xl font-bold">{card.name}</h3>
-                  <span className="text-xs bg-gray-800 text-gray-300 px-2 py-1 rounded">ID: {card.id}</span>
+                  <span className="text-xs bg-gray-800 text-gray-300 px-2 py-1 rounded uppercase">
+                    {card.category || 'Inne'}
+                  </span>
                 </div>
                 <p className="text-gray-400 text-sm mb-4">Zestaw: {card.set_name || 'Brak'}</p>
 
-                {/* Sekcja giełdowa: Kto ma, kto szuka */}
+                {/* Giełda dla danej karty */}
                 <div className="mb-5 bg-gray-950/60 p-3 rounded-lg border border-gray-800/80 text-xs space-y-2">
                   <div>
                     <span className="text-green-400 font-semibold">🟢 Mają na wymianę:</span>{' '}
@@ -171,7 +199,7 @@ export default function Home() {
                 </div>
               </div>
               
-              {/* Przyciski zarządzania własnym stanem karty */}
+              {/* Przyciski */}
               <div className="flex flex-col gap-2">
                 <button 
                   onClick={() => handleCardAction(card.id, 'need')}
